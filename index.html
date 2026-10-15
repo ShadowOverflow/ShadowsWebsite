@@ -1,0 +1,1017 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Shadow Overflow</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #050412;
+      --panel: rgba(13, 9, 38, 0.82);
+      --panel-border: rgba(255, 255, 255, 0.08);
+      --divider: rgba(255, 255, 255, 0.08);
+      --text: #f4f2ff;
+      --text-muted: #8696b2;
+      --accent: #7c5cff;
+      --accent-strong: #4c19c6;
+      --content-max: 600px;
+    }
+
+    /* Reset and layout */
+    html, body {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      min-height: 100%;
+      background-color: var(--bg);
+      font-family: ui-sans-serif, system-ui, -apple-system, sans-serif;
+      color: var(--text);
+    }
+
+    h1, h2 {
+      font-family: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif;
+    }
+
+    a { color: inherit; }
+
+    a:focus-visible,
+    button:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      * { transition: none !important; }
+    }
+
+    /* Full-page wrapper. Can grow taller than the viewport so the page scrolls
+       on smaller screens; the canvas stays fixed behind everything. */
+    .glyph-rain-wrapper {
+      position: relative;
+      width: 100%;
+      min-height: 100vh;
+    }
+
+    /* Source canvas (hidden, used for capturing content) */
+    #sourceCanvas {
+      display: none;
+    }
+
+    /* WebGL output canvas — fixed full-viewport background */
+    #outputCanvas {
+      position: fixed;
+      inset: 0;
+      width: 100vw;
+      height: 100vh;
+      display: block;
+      pointer-events: auto;
+      z-index: 1;
+    }
+
+    /* Foreground column: hero art + content panel, always stacked with the
+       GIF flush against the panel's top edge (no gap between them) — the
+       character's hand is drawn holding on to that top edge. */
+    .page-content {
+      position: relative;
+      z-index: 10;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      width: 100%;
+      box-sizing: border-box;
+      padding: 3rem 1.25rem 4rem;
+      gap: 0;
+    }
+
+    /* Hero GIF — sits directly on top of the panel, against the background.
+       Bounded on both axes so it always keeps its aspect ratio and never
+       overwhelms the layout, regardless of the source file's resolution.
+       position + z-index keep it painted above the panel it touches. */
+    .hero-art {
+      position: relative;
+      z-index: 2;
+      width: 100%;
+      max-width: var(--content-max);
+      display: block;
+      flex-shrink: 0;
+      margin: 0;
+      padding: 0;
+    }
+
+    .hero-art img {
+      display: block;
+      width: 100%;
+      height: auto;
+      margin: 0;
+    }
+
+    /* Content panel — sits flush under the hero art, z-index below it so the
+       character's hand always renders on top of the panel's edge. */
+    #contentContainer {
+      position: relative;
+      z-index: 1;
+      width: 100%;
+      max-width: 600px;
+      margin-top: 0;
+      padding: 2rem 2.25rem 2.5rem;
+      background: var(--panel);
+      border: 1px solid var(--panel-border);
+      border-radius: 1rem;
+      backdrop-filter: blur(12px);
+      box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);
+      pointer-events: auto;
+      box-sizing: border-box;
+      width: 100%;
+      max-width: var(--content-max);
+    }
+
+    /* Name, handle, and short info — centered as a header block */
+    .profile-header {
+      text-align: center;
+      margin-bottom: 1.5rem;
+    }
+
+    h1 {
+      margin: 0 0 0.2rem;
+      font-size: 2rem;
+      font-weight: 700;
+      letter-spacing: -0.025em;
+    }
+
+    .handle {
+      margin: 0 0 0.85rem;
+      color: var(--text-muted);
+      font-weight: 600;
+    }
+
+    p {
+      line-height: 1.6;
+      color: var(--text-muted);
+      margin: 0 0 1rem;
+    }
+
+    .info-bar {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      align-items: center;
+      gap: 0.6rem;
+      font-size: 0.95rem;
+      color: var(--text-muted);
+    }
+
+    .info-bar .divider {
+      color: var(--panel-border);
+    }
+
+    /* Socials — big, clickable icon + label pairs, not app-style circles */
+    .socials {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      align-items: center;
+      gap: 0.75rem 1.25rem;
+      padding-bottom: 1.5rem;
+      margin-bottom: 1.5rem;
+      border-bottom: 1px solid var(--divider);
+    }
+
+    .social-link {
+      display: flex;
+      align-items: center;
+      gap: 0.65rem;
+      padding: 0.35rem 0.85rem 0.35rem 0.35rem;
+      border-radius: 0.85rem;
+      text-decoration: none;
+      color: var(--text);
+      font-weight: 600;
+      font-size: 1rem;
+      transition: background 0.15s ease, transform 0.15s ease;
+    }
+
+    .social-link:hover,
+    .social-link:focus-visible {
+      background: rgba(255, 255, 255, 0.06);
+      transform: translateY(-1px);
+    }
+
+    .social-link img {
+      width: 52px;
+      height: 52px;
+      border-radius: 12px;
+      object-fit: cover;
+      display: block;
+      flex-shrink: 0;
+    }
+
+    /* Page content sections */
+    .page-section {
+      margin-bottom: 1.75rem;
+    }
+
+    .page-section:last-child {
+      margin-bottom: 0;
+    }
+
+    .page-section h2 {
+      font-size: 1.05rem;
+      font-weight: 600;
+      margin: 0 0 0.5rem;
+      padding-bottom: 0.4rem;
+      border-bottom: 1px solid var(--divider);
+    }
+
+    /* ================= Interests wheel carousel ================= */
+
+    /* Full-bleed row: cancels #contentContainer's side padding so the wheel
+       touches the left wall and the image touches the right wall.
+       --R (circle radius) is set by the JS from the row's width. */
+    .interests {
+      --pad: 2.25rem;
+      --R: 244px;
+      position: relative;
+      display: grid;
+      grid-template-columns: calc(var(--R) * 0.848) 1fr;  /* wheel column is narrow; image gets the rest */
+      align-items: center;
+      margin: 0.75rem calc(-1 * var(--pad)) 1.75rem;
+      overflow: hidden;
+      user-select: none;
+    }
+
+    /* Wheel (left column). Circle center = left wall, mid-height */
+    .wheel {
+      grid-column: 1;
+      grid-row: 1;
+      position: relative;
+      width: calc(var(--R) * 0.86);
+      height: calc(var(--R) * 2);
+      font-size: calc(var(--R) * 0.0788);
+    }
+
+    /* Items fade together while the wheel is turning */
+    .wheel-items {
+      position: absolute;
+      inset: 0;
+      opacity: 1;
+      transition: opacity 0.25s ease;
+    }
+    .wheel.moving .wheel-items { opacity: 0.12; }
+
+    .wheel-item {
+      position: absolute;
+      top: 0;
+      left: 0;
+      padding: 0.2em 0;
+      background: none;
+      border: 0;
+      font: 500 1em 'Space Grotesk', ui-sans-serif, system-ui, sans-serif;
+      color: var(--text);
+      white-space: nowrap;
+      cursor: pointer;
+      transform-origin: right center;
+      will-change: transform, opacity;
+    }
+    .wheel-item.active { font-weight: 700; color: #fff; }
+
+    /* Arrows sit directly above / below the centered item */
+    .wheel-btn {
+      position: absolute;
+      z-index: 20;
+      left: calc(var(--R) * 0.688);  /* center-item right edge (R * (1 - SHIFT)) minus a little */
+      width: calc(var(--R) * 0.12);
+      height: calc(var(--R) * 0.12);
+      min-width: 30px;
+      min-height: 30px;
+      display: grid;
+      place-items: center;
+      padding: 0;
+      color: var(--text);
+      background: rgba(124, 92, 255, 0.18);
+      border: 1px solid var(--panel-border);
+      border-radius: 50%;
+      cursor: pointer;
+      transform: translate(-50%, -50%);
+      transition: background 0.15s ease;
+    }
+    .wheel-btn:hover { background: rgba(124, 92, 255, 0.4); }
+    .wheel-btn.up   { top: calc(50% - var(--R) * 0.2); }
+    .wheel-btn.down { top: calc(50% + var(--R) * 0.2); }
+    .wheel-btn svg  { width: 55%; height: 55%; }
+
+    /* Image (right column), flush with the right wall */
+    .interest-image {
+      grid-column: 2;
+      grid-row: 1;
+      position: relative;
+      width: 100%;
+      aspect-ratio: 1 / 1;
+      min-width: 0;
+      overflow: hidden;
+    }
+    .interest-image img {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      opacity: 0;
+      transition: opacity 0.5s ease;
+    }
+    .interest-image img.show { opacity: 1; }
+
+    @media (max-width: 600px) {
+      .page-content {
+        padding: 2rem 0.9rem 3rem;
+      }
+
+      #contentContainer {
+        padding: 1.5rem 1.25rem 2rem;
+      }
+
+      .interests { --pad: 1.25rem; }
+
+      h1 {
+        font-size: 1.6rem;
+      }
+    }
+
+
+    @media (min-width: 600px) {
+      .page-content {
+        justify-content: center;
+        min-height: 100vh;
+        padding: 2rem;
+      }
+
+      .hero-art {
+        max-width: 579px;
+        max-height: 77vh;
+      }
+
+      .hero-art img {
+        max-height: 72vh;
+      }
+
+      #contentContainer {
+        max-width: 640px;
+      }
+    }
+    
+    
+    
+    
+
+    
+    
+    
+  .cal-nav {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin: 0.75rem 0;
+  }
+  .cal-range {
+    font-family: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif;
+    font-weight: 600;
+    color: var(--text);
+  }
+  .cal-btn {
+    width: 34px;
+    height: 34px;
+    display: grid;
+    place-items: center;
+    padding: 0;
+    color: var(--text);
+    background: rgba(124, 92, 255, 0.18);
+    border: 1px solid var(--panel-border);
+    border-radius: 50%;
+    cursor: pointer;
+    transition: background 0.15s ease, opacity 0.15s ease;
+  }
+  .cal-btn:hover:not(:disabled) { background: rgba(124, 92, 255, 0.4); }
+  .cal-btn:disabled { opacity: 0.3; cursor: default; }
+  .cal-btn svg { width: 55%; height: 55%; }
+  .cal-btns { display: flex; gap: 0.5rem; }
+
+  .cal-scroll { overflow: hidden; }
+  .cal-msg { text-align: center; padding: 2.5rem 0; margin: 0; }
+ 
+  .cal-head, .cal-allday, .cal-body {
+    display: grid;
+    grid-template-columns: 42px repeat(7, minmax(0, 1fr));
+  }
+  .cal-dayhead {
+    text-align: center;
+    padding: 0.35rem 0;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    border-bottom: 1px solid var(--divider);
+  }
+  .cal-dayhead b {
+    display: block;
+    font-family: 'Space Grotesk', ui-sans-serif, system-ui, sans-serif;
+    font-size: 1.1rem;
+    color: var(--text);
+  }
+  .cal-dayhead.today b { color: var(--accent); }
+  .cal-dayhead.today { border-bottom-color: var(--accent); }
+ 
+  .cal-allday > div { padding: 3px 2px; display: flex; flex-direction: column; gap: 2px; }
+  .cal-chip {
+    font-size: 0.7rem;
+    line-height: 1.3;
+    padding: 1px 5px;
+    border-radius: 4px;
+    overflow: hidden;
+    white-space: nowrap;
+    text-overflow: ellipsis;
+  }
+ 
+  .cal-body { position: relative; margin: 8px 0; }
+  .cal-hours { position: relative; }
+  .cal-hours span {
+    position: absolute;
+    right: 6px;
+    transform: translateY(-50%);
+    font-size: 0.68rem;
+    color: var(--text-muted);
+    white-space: nowrap;
+  }
+  .cal-col {
+    position: relative;
+    border-left: 1px solid var(--divider);
+    background-image: linear-gradient(var(--divider) 1px, transparent 1px);
+    background-size: 100% var(--hour);
+  }
+  .cal-col:last-child { border-right: 1px solid var(--divider); }
+ 
+  .cal-ev {
+    position: absolute;
+    box-sizing: border-box;
+    padding: 2px 4px;
+    border-radius: 6px;
+    border: 1px solid rgba(5, 4, 18, 0.55);
+    font-size: 0.72rem;
+    line-height: 1.25;
+    overflow: hidden;
+    /* fade in from the left, staggered by day column */
+    opacity: 0;
+    transform: translateX(-10px);
+    transition: opacity 0.6s ease var(--delay), transform 0.6s ease var(--delay);
+  }
+  .cal-grid.in .cal-ev { opacity: 1; transform: none; }
+  .cal-ev b { display: block; font-weight: 600; overflow: hidden; text-overflow: ellipsis; }
+  .cal-ev small { display: block; font-size: 0.66rem; opacity: 0.85; }
+  .cal-note { margin: 0.5rem 0 0; font-size: 0.8rem; }
+    
+    
+    
+    
+    
+    
+    
+    
+
+    
+    
+    
+    
+    
+  </style>
+</head>
+<body>
+
+  <div class="glyph-rain-wrapper">
+    <!-- Source Canvas used for capturing content -->
+    <canvas id="sourceCanvas"></canvas>
+
+    <!-- WebGL Output Canvas (fixed full-screen background) -->
+    <canvas id="outputCanvas"></canvas>
+
+    <div class="page-content">
+
+      <!-- Hero GIF, above the content panel and directly against the background.
+           Bounded by max-width/max-height + object-fit so it keeps its aspect
+           ratio at any resolution. Loads the static first frame immediately,
+           then swaps to the animated GIF once it scrolls into view. -->
+      <div class="hero-art">
+        <img
+          id="heroGif"
+          src="ShadowOverflowFirstFrame.png"
+          data-src="ShadowOverflowHello.gif"
+          alt="Shadow Overflow"
+          loading="lazy"
+        >
+      </div>
+
+      <div id="contentContainer">
+`   
+        <div class="profile-header">
+          <h1>Shadow</h1>
+          <p class="handle">@ShadowOverflow</p>
+          <div class="info-bar">
+            <span>Justin</span>
+            <span class="divider">|</span>
+            <span>Age: 22</span>
+            <span class="divider">|</span>
+            <span>He/Him</span>
+            <span class="divider">|</span>
+            <span>Single</span>
+          </div>
+        </div>
+
+        <div class="socials">
+          <a class="social-link" href="https://steamcommunity.com/id/ShadowOverflow/" target="_blank" rel="noopener">
+            <img src="DiscordLogo.jpg" alt="Discord logo">
+            Discord
+          </a>
+          <a class="social-link" href="https://steamcommunity.com/id/ShadowOverflow/" target="_blank" rel="noopener">
+            <img src="SteamLogo.png" alt="Steam logo">
+            Steam
+          </a>
+        </div>
+
+        <div class="page-section">
+          <h2>About Me</h2>
+          <p>Howdy! I love learning new things and improving my skills.
+            I regularly learn and improve my skills
+            such as Blender, Photoshop, Premiere Pro, Davinci,
+            Godot, and random coding projects.</p>
+        </div>
+        
+        
+        <!-- Interests wheel carousel -->
+        <div class="page-section" style="margin-bottom:0">
+          <h2>Interests</h2>
+        </div>
+        <div class="interests" id="interests">
+
+          <div class="wheel" id="wheel" tabindex="0" aria-label="Interests carousel">
+            <button class="wheel-btn up" id="wheelUp" aria-label="Previous interest">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 15l6-6 6 6"/></svg>
+            </button>
+
+            <div class="wheel-items" id="wheelItems"></div>
+
+            <button class="wheel-btn down" id="wheelDown" aria-label="Next interest">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>
+            </button>
+          </div>
+
+          <div class="interest-image" aria-live="polite">
+            <img id="imgA" alt="">
+            <img id="imgB" alt="">
+          </div>
+
+        </div>
+
+
+
+<div class="page-section">
+  <h2>Availability</h2>
+  <div class="cal-nav">
+    <span class="cal-range" id="calRange">&nbsp;</span>
+    <div class="cal-btns">
+      <button class="cal-btn" id="calPrev" aria-label="Previous week" disabled>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg>
+      </button>
+      <button class="cal-btn" id="calNext" aria-label="Next week" disabled>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>
+      </button>
+    </div>
+  </div>
+  <div class="cal-scroll"><div class="cal-inner" id="calMount"><p class="cal-msg">Loading calendar…</p></div></div>
+  <p class="cal-note">Subject to change.</p>
+  <p class="cal-note">Times shown in Eastern Time.</p>
+</div>
+        
+        
+
+
+        <div class="page-section">
+          <h2>And so on</h2>
+          <p>More content will be added soon. </p>
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <script type="module">
+    import { createGlyphRain } from './GlyphRainVanilla.js';
+
+    const source = document.getElementById('sourceCanvas');
+    const content = document.getElementById('contentContainer');
+    const output = document.getElementById('outputCanvas');
+
+    const rainInstance = createGlyphRain(
+      { source, content, output },
+      {
+        cell: 10,
+        speed: 0.06,
+        density: 0.3,
+        glow: 1.4,
+        dim: 0.5,
+        light: 2.8,
+        lightRadius: 220,
+        color: [0.11, 0.07, 0.29],
+        headColor: [0.18, 0.12, 0.43]
+      }
+    );
+
+    window.addEventListener('beforeunload', () => {
+      rainInstance?.destroy();
+    });
+
+    // Lazy-load the hero GIF: the static first frame is shown immediately,
+    // and the animated GIF is swapped in once the image scrolls into view.
+    const heroGif = document.getElementById('heroGif');
+    if (heroGif) {
+      const swapToGif = () => {
+        if (heroGif.dataset.src) {
+          heroGif.src = heroGif.dataset.src;
+          heroGif.removeAttribute('data-src');
+        }
+      };
+
+      if ('IntersectionObserver' in window) {
+        const io = new IntersectionObserver((entries, observer) => {
+          entries.forEach((entry) => {
+            if (entry.isIntersecting) {
+              swapToGif();
+              observer.unobserve(entry.target);
+            }
+          });
+        });
+        io.observe(heroGif);
+      } else {
+        swapToGif();
+      }
+    }
+  </script>
+
+  <!-- Interests wheel carousel -->
+  <script>
+  (() => {
+    // ---- Edit this list. Swap `image` for real per-activity pictures later. ----
+    const interests = [
+      { label: 'Climbing',      image: 'ShadowClimbing.png' },
+      { label: 'Chess',         image: 'ShadowChess.png' },
+      { label: 'Graphics',      image: 'ShadowGraphics.png' },
+      { label: 'Animation',     image: 'PlaceholderForeground.png' },
+      { label: 'Editing',       image: 'ShadowEditing.png' },
+      { label: 'GameDev',       image: 'ShadowGameDev.png' },
+      { label: 'Foraging',      image: 'ShadowForage.png' },
+      { label: 'Guitar',        image: 'ShadowGuitar.png' },
+      { label: 'Piano',         image: 'ShadowPiano.png' }
+
+
+    ];
+    const N = interests.length;
+
+    // ---- Tuning ----
+    const STEP_DEG  = 30;     // slots at 120/150/180/210/240°
+    const R_RATIO   = 0.3825; // circle radius as a fraction of the row's width
+    const SHIFT     = 0.212;  // how far the circle center sits left of the wall, in radii (crops the empty left side)
+    const SLOT_FADE = 0.4;    // opacity lost per slot away from center
+    const DURATION  = 450;    // ms per move
+
+    const row     = document.getElementById('interests');
+    const wheel   = document.getElementById('wheel');
+    const itemsEl = document.getElementById('wheelItems');
+    const btnUp   = document.getElementById('wheelUp');
+    const btnDown = document.getElementById('wheelDown');
+    const imgs    = [document.getElementById('imgA'), document.getElementById('imgB')];
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    let R = 244;
+    let target = 0;      // unbounded integer so the wheel loops forever
+    let pos = 0;         // animated (fractional) position
+    let raf = null, moveTimer = null;
+    let shownImg = -1, imgSlot = 0;
+
+    const mod = i => ((i % N) + N) % N;
+
+    const nodes = interests.map((it, i) => {
+      const b = document.createElement('button');
+      b.className = 'wheel-item';
+      b.type = 'button';
+      b.textContent = it.label;
+      b.addEventListener('click', () => {
+        // take the short way around the loop to the clicked item
+        let d = i - mod(target);
+        d -= N * Math.round(d / N);
+        if (d) select(target + d);
+      });
+      itemsEl.appendChild(b);
+      return b;
+    });
+
+    function measure() {
+      R = Math.max(100, row.clientWidth * R_RATIO);
+      row.style.setProperty('--R', R + 'px');
+    }
+
+    function render() {
+      const cy = wheel.clientHeight / 2;
+      const active = mod(Math.round(pos));
+
+      nodes.forEach((node, i) => {
+        let off = i - pos;
+        off -= N * Math.round(off / N);          // wrap to nearest copy
+        const a = Math.abs(off);
+        const opacity = Math.max(0, 1 - SLOT_FADE * a);
+
+        if (a > 2.5 || opacity <= 0) { node.style.visibility = 'hidden'; return; }
+        node.style.visibility = 'visible';
+
+        const phi = off * STEP_DEG * Math.PI / 180;
+        const x = R * (Math.cos(phi) - SHIFT);   // circle center sits slightly left of the wall
+        const y = cy + R * Math.sin(phi);
+        const scale = 1 + 0.3 * Math.max(0, 1 - a);
+
+        node.style.transform =
+          `translate(${x - node.offsetWidth}px, ${y - node.offsetHeight / 2}px) ` +
+          `rotate(${off * STEP_DEG}deg) scale(${scale})`;
+        node.style.opacity = opacity;
+        node.style.zIndex = 10 - Math.round(a);
+        node.classList.toggle('active', i === active);
+      });
+    }
+
+    const ease = t => 1 - Math.pow(1 - t, 3);
+
+    function animateTo(to) {
+      cancelAnimationFrame(raf);
+      if (reduceMotion) { pos = to; render(); return; }
+      const from = pos, start = performance.now();
+      wheel.classList.add('moving');             // fade out; buttons stay clickable
+      clearTimeout(moveTimer);
+
+      const tick = now => {
+        const t = Math.min(1, (now - start) / DURATION);
+        pos = from + (to - from) * ease(t);
+        render();
+        if (t < 1) raf = requestAnimationFrame(tick);
+        else moveTimer = setTimeout(() => wheel.classList.remove('moving'), 60);
+      };
+      raf = requestAnimationFrame(tick);
+    }
+
+    function showImage(index) {
+      if (index === shownImg) return;
+      shownImg = index;
+      const next = imgs[imgSlot ^ 1], prev = imgs[imgSlot];
+      next.src = interests[index].image;
+      next.alt = interests[index].label;
+      prev.classList.remove('show');
+      next.classList.add('show');
+      imgSlot ^= 1;
+    }
+
+    function select(t) {
+      target = t;
+      showImage(mod(t));
+      animateTo(t);
+    }
+
+    btnUp.addEventListener('click',   () => select(target - 1));
+    btnDown.addEventListener('click', () => select(target + 1));
+    wheel.addEventListener('keydown', e => {
+      if (e.key === 'ArrowUp')   { e.preventDefault(); select(target - 1); }
+      if (e.key === 'ArrowDown') { e.preventDefault(); select(target + 1); }
+    });
+
+    new ResizeObserver(() => { measure(); render(); }).observe(row);
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(render);
+
+    measure();
+    showImage(0);
+    render();
+  })();
+    
+    
+    
+    
+    
+    
+    
+    
+    
+    
+const colorFor = title => {
+  const c = (title || '').trim().charAt(0).toUpperCase();
+  if (c === 'W') return '#301c98';
+  if (c === 'C') return '#532c7a';
+  return '#8b71d1';
+};
+    
+    
+    
+(() => {
+  const CONFIG = {
+    apiKey: 'AIzaSyAO4lGA11K-vwud1amNTadJPkB8axNWe60',  //AIzaSyAO4lGA11K-vwud1amNTadJPkB8axNWe60               // Google Cloud API key (restrict to your site + Calendar API)
+    calendarId: 'unknowndawnpublic@gmail.com',
+    timeZone: 'America/Detroit',
+    defaultColor: '#301c98',                     // calendar's own color (the API can't read it with just a key)
+    weeksForward: 3,
+    startHour: 8,                                // 8:00 AM
+    endHour: 24                                  // 12:00 AM next day
+  };
+ 
+  // Google's per-event color palette (event.colorId)
+  const EVENT_COLORS = {
+    1: '#a4bdfc', 2: '#7ae7bf', 3: '#dbadff', 4: '#ff887c', 5: '#fbd75b', 6: '#ffb878',
+    7: '#46d6db', 8: '#e1e1e1', 9: '#5484ed', 10: '#51b749', 11: '#dc2127'
+  };
+ 
+  const TZ = CONFIG.timeZone;
+  const HOUR_PX = 34;
+  const HOURS = CONFIG.endHour - CONFIG.startHour;
+  const HOUR_MS = 3600000;
+ 
+  const mount = document.getElementById('calMount');
+  const rangeEl = document.getElementById('calRange');
+  const prevBtn = document.getElementById('calPrev');
+  const nextBtn = document.getElementById('calNext');
+ 
+  // ---- Time zone helpers (everything is computed in the calendar's zone) ----
+  const partsFmt = new Intl.DateTimeFormat('en-US', {
+    timeZone: TZ, hourCycle: 'h23', year: 'numeric', month: 'numeric',
+    day: 'numeric', hour: 'numeric', minute: 'numeric'
+  });
+  const timeFmt = new Intl.DateTimeFormat('en-US', { timeZone: TZ, hour: 'numeric', minute: '2-digit' });
+  const md = new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', month: 'short', day: 'numeric' });
+  const wd = new Intl.DateTimeFormat('en-US', { timeZone: 'UTC', weekday: 'short' });
+ 
+  const parts = ms => {
+    const o = {};
+    partsFmt.formatToParts(ms).forEach(p => { o[p.type] = p.value; });
+    return { y: +o.year, m: +o.month - 1, d: +o.day, h: +o.hour, mi: +o.minute };
+  };
+  const wallAsUtc = ms => { const p = parts(ms); return Date.UTC(p.y, p.m, p.d, p.h, p.mi); };
+  // Wall-clock time in TZ -> real timestamp (Date.UTC normalizes overflow like day 32 or hour 26)
+  const zoned = (y, m, d, h = 0) => {
+    const guess = Date.UTC(y, m, d, h);
+    const first = guess - (wallAsUtc(guess) - guess);
+    return guess - (wallAsUtc(first) - first);
+  };
+  const dayKey = (y, m, d) => new Date(Date.UTC(y, m, d)).toISOString().slice(0, 10);
+ 
+  // ---- Week model ----
+  const now = parts(Date.now());
+  const dow = new Date(Date.UTC(now.y, now.m, now.d)).getUTCDay();   // weeks start Sunday
+  const todayKey = dayKey(now.y, now.m, now.d);
+ 
+  const weekDays = w => Array.from({ length: 7 }, (_, i) => {
+    const base = { y: now.y, m: now.m, d: now.d - dow + w * 7 + i };
+    const date = new Date(Date.UTC(base.y, base.m, base.d));
+    return {
+      date,
+      key: date.toISOString().slice(0, 10),
+      start: zoned(base.y, base.m, base.d, CONFIG.startHour),
+      end: zoned(base.y, base.m, base.d, CONFIG.endHour)
+    };
+  });
+ 
+  // ---- Helpers ----
+  const esc = s => String(s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+  const textOn = hex => {
+    const n = parseInt(hex.slice(1), 16);
+    const lum = (0.299 * (n >> 16) + 0.587 * ((n >> 8) & 255) + 0.114 * (n & 255)) / 255;
+    return lum > 0.6 ? '#111' : '#fff';
+  };
+  const hourLabel = h => { const x = h % 24; return (x % 12 || 12) + (x < 12 ? ' AM' : ' PM'); };
+ 
+  // Side-by-side lanes for overlapping events within one day
+  function layout(evs) {
+    let cluster = [], end = 0;
+    const flush = () => {
+      const lanes = [];
+      cluster.forEach(ev => {
+        let l = lanes.findIndex(e => e <= ev.s);
+        if (l < 0) { l = lanes.length; lanes.push(0); }
+        lanes[l] = ev.e; ev.lane = l;
+      });
+      cluster.forEach(ev => { ev.lanes = lanes.length; });
+      cluster = []; end = 0;
+    };
+    evs.forEach(ev => {
+      if (cluster.length && ev.s >= end) flush();
+      cluster.push(ev); end = Math.max(end, ev.e);
+    });
+    flush();
+  }
+ 
+  // ---- Data ----
+  let events = [];
+  let week = 0, seen = false, grid = null;
+ 
+  async function load() {
+    if (!CONFIG.apiKey || CONFIG.apiKey.startsWith('YOUR_')) throw new Error('Missing API key');
+    const first = weekDays(0)[0], last = weekDays(CONFIG.weeksForward)[6];
+    const qs = new URLSearchParams({
+      key: CONFIG.apiKey,
+      timeMin: new Date(first.start).toISOString(),
+      timeMax: new Date(last.end).toISOString(),
+      timeZone: TZ,
+      singleEvents: 'true',
+      orderBy: 'startTime',
+      maxResults: '250',
+      fields: 'items(id,summary,colorId,status,start,end)'
+    });
+    const url = `https://www.googleapis.com/calendar/v3/calendars/${encodeURIComponent(CONFIG.calendarId)}/events?${qs}`;
+    const res = await fetch(url);
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    const data = await res.json();
+    events = (data.items || []).filter(e => e.status !== 'cancelled' && e.start && e.end).map(e => ({
+      title: e.summary || 'Busy',
+      color: colorFor(e.summary),
+      allDay: !!e.start.date,
+      s: e.start.dateTime ? Date.parse(e.start.dateTime) : 0,
+      e: e.end.dateTime ? Date.parse(e.end.dateTime) : 0,
+      sd: e.start.date, ed: e.end.date                    // all-day: end date is exclusive
+    }));
+  }
+ 
+  // ---- Render ----
+  function render() {
+    const days = weekDays(week);
+    const allDay = days.map(d => events.filter(e => e.allDay && e.sd <= d.key && d.key < e.ed));
+    const hasAllDay = allDay.some(a => a.length);
+ 
+    const head = days.map(d =>
+      `<div class="cal-dayhead${d.key === todayKey ? ' today' : ''}">${wd.format(d.date)}<b>${d.date.getUTCDate()}</b></div>`
+    ).join('');
+ 
+    const allDayRow = hasAllDay
+      ? `<div class="cal-allday"><span></span>${allDay.map(list =>
+          `<div>${list.map(e => `<div class="cal-chip" title="${esc(e.title)}" style="background:${e.color};color:${textOn(e.color)}">${esc(e.title)}</div>`).join('')}</div>`
+        ).join('')}</div>`
+      : '';
+ 
+    const hours = Array.from({ length: HOURS + 1 }, (_, i) =>
+      `<span style="top:${i * HOUR_PX}px">${hourLabel(CONFIG.startHour + i)}</span>`
+    ).join('');
+ 
+    const cols = days.map((d, di) => {
+      // clip each event to this day's 8 AM -> 2 AM window
+      const list = events.filter(e => !e.allDay && e.e > d.start && e.s < d.end)
+        .map(e => ({ ...e, ws: e.s, we: e.e, s: Math.max(e.s, d.start), e: Math.min(e.e, d.end) }))
+        .sort((a, b) => a.s - b.s);
+      layout(list);
+      const html = list.map(e => {
+        const top = (e.s - d.start) / HOUR_MS * HOUR_PX;
+        const h = Math.max(18, (e.e - e.s) / HOUR_MS * HOUR_PX);
+        const w = 100 / e.lanes;
+        const label = `${timeFmt.format(e.ws)} – ${timeFmt.format(e.we)}`;
+        return `<div class="cal-ev" title="${esc(e.title)}, ${label}" style="top:${top}px;height:${h}px;left:calc(${e.lane * w}% + 1px);width:calc(${w}% - 2px);` +
+          `background:${e.color};color:${textOn(e.color)};--delay:${di * 90}ms">` +
+          `<b>${esc(e.title)}</b></div>`;
+      }).join('');
+      return `<div class="cal-col">${html}</div>`;
+    }).join('');
+ 
+    mount.innerHTML =
+      `<div class="cal-grid" style="--hour:${HOUR_PX}px">` +
+        `<div class="cal-head"><span></span>${head}</div>${allDayRow}` +
+        `<div class="cal-body" style="height:${HOURS * HOUR_PX}px"><div class="cal-hours">${hours}</div>${cols}</div>` +
+      `</div>`;
+    grid = mount.firstElementChild;
+ 
+    const a = days[0].date, b = days[6].date;
+    rangeEl.textContent = `${md.format(a)} – ${a.getUTCMonth() === b.getUTCMonth() ? b.getUTCDate() : md.format(b)}`;
+    prevBtn.disabled = week === 0;
+    nextBtn.disabled = week === CONFIG.weeksForward;
+ 
+    // fade events in from the left once the calendar has scrolled into view
+    if (seen) requestAnimationFrame(() => requestAnimationFrame(() => grid.classList.add('in')));
+  }
+ 
+  function fail() {
+    mount.innerHTML = '<p class="cal-msg">Calendar unavailable.</p>';
+    rangeEl.textContent = '';
+    prevBtn.disabled = nextBtn.disabled = true;
+  }
+ 
+  prevBtn.addEventListener('click', () => { if (week > 0) { week--; render(); } });
+  nextBtn.addEventListener('click', () => { if (week < CONFIG.weeksForward) { week++; render(); } });
+ 
+  const io = new IntersectionObserver(entries => {
+    if (!entries.some(e => e.isIntersecting)) return;
+    seen = true;
+    io.disconnect();
+    if (grid) requestAnimationFrame(() => grid.classList.add('in'));
+  }, { threshold: 0.15 });
+  io.observe(mount);
+ 
+  load().then(render).catch(err => { console.error('Calendar failed:', err); fail(); });
+})();
+    
+    
+  </script>
+</body>
+</html>
